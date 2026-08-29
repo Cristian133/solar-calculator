@@ -1,0 +1,21 @@
+Necesito hacer una calculadora solar que tenga las siguientes funciones:
+
+1) Cálculo de horas de sol en un día del año y en un latitud/longitud dada
+
+2) Gráfica que muestre la evolución de las horas de sol a lo largo del año de determinada latitud/longitud. Podría ser horas de salida/puesta del sol en eje de coordenadas y días del año en eje de abcisas, para determinada latitud/longitud
+
+3) El sol no sale siempre exactamente al Este, sino que la posoción exacta de salida también varia a lo largo del año y para distintas latitud/longitud. Quiero una gráfica que lo muestre. Podría ser un gráfico redondo que muestre la trayectoria del sol.
+
+4) Calcular la hora del mediodía y la inclinación del sol a mediodia dependiendo del día del año y la latitud/longitud del observador.
+
+5) Determinar la potencia  que recibe del sol una parcela de tierra. Podría ser por metro cuadrado, en un día del año, para una posición del observador.
+
+La primera etapa será con estos 5 puntos y otros que se me vayan ocurriendo durante el desarrollo. Gráficas.
+
+Luego en una segunda etapa incluiremos eclipses, calculo de mareas, calendario lunar, pascuas.
+
+En una tercera etapa metereología: estadísticas de lluvias mensuales, anuales, nubosidad, horas de sol.
+
+La aplicación queda abierta a otras etapas no contempladas en este momento por eso debemos preveer que sea escalable.
+
+En el futuro, cuando la aplicación web esté funcional se hará para celular. No por el momento.

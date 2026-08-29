@@ -1,0 +1,24 @@
+# Etapa 1: sin base de datos ni cache — el motor de cálculo es puro/stateless
+# (ver docs/plan_tecnico.md, decisión de infra). Se suman servicios acá si
+# una etapa futura los requiere (ej. cache de datos meteorológicos).
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0
