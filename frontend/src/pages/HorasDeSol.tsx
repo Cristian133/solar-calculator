@@ -8,11 +8,14 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-function formatTime(iso: string): string {
+/** Formatea un instante (ISO, en UT) en la hora local del lugar
+ * consultado — no la del navegador, que puede ser una zona horaria
+ * distinta a la del lugar. */
+function formatTime(iso: string, timezone: string): string {
   return new Date(iso).toLocaleTimeString('es-AR', {
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'UTC',
+    timeZone: timezone,
   })
 }
 
@@ -56,10 +59,13 @@ export default function HorasDeSol() {
         <h1 style={{ marginBottom: '0.25rem' }}>Horas de sol</h1>
         <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{location.displayName}</p>
 
-        <label style={{ display: 'block', marginBottom: '1rem' }}>
+        <label style={{ display: 'block', marginBottom: '0.25rem' }}>
           Fecha:{' '}
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
+        <p style={{ margin: '0 0 1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          Horarios en hora local del lugar ({location.timezone})
+        </p>
 
         {dailyError && <p style={{ color: 'var(--series-2)' }}>{dailyError}</p>}
 
@@ -88,13 +94,13 @@ export default function HorasDeSol() {
                 <div>
                   <dt style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Orto</dt>
                   <dd style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>
-                    {formatTime(daily.sunrise!)}
+                    {formatTime(daily.sunrise!, location.timezone)}
                   </dd>
                 </div>
                 <div>
                   <dt style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Ocaso</dt>
                   <dd style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>
-                    {formatTime(daily.sunset!)}
+                    {formatTime(daily.sunset!, location.timezone)}
                   </dd>
                 </div>
                 <div>
@@ -108,7 +114,7 @@ export default function HorasDeSol() {
             <div>
               <dt style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Mediodía solar</dt>
               <dd style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>
-                {formatTime(daily.transit)}
+                {formatTime(daily.transit, location.timezone)}
               </dd>
             </div>
           </dl>

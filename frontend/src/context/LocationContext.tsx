@@ -5,6 +5,9 @@ export interface SelectedLocation {
   displayName: string
   latitude: number
   longitude: number
+  /** Huso horario IANA del lugar (ej. "America/Argentina/Buenos_Aires"),
+   * resuelto al elegir la ubicación — ver `api/timezone.ts`. */
+  timezone: string
 }
 
 interface LocationContextValue {
@@ -19,7 +22,12 @@ const LocationContext = createContext<LocationContextValue | null>(null)
 function readStoredLocation(): SelectedLocation | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as SelectedLocation) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<SelectedLocation>
+    // Descarta lo guardado por una versión anterior sin `timezone` (o
+    // corrupto) en vez de propagar `undefined` a Intl.DateTimeFormat.
+    if (typeof parsed.timezone !== 'string' || !parsed.timezone) return null
+    return parsed as SelectedLocation
   } catch {
     return null // localStorage puede fallar (modo privado, etc.) — sin ubicación guardada
   }

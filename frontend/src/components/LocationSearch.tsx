@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { searchLocation } from '../api/geocoding'
 import type { GeocodingResult } from '../api/geocoding'
+import { resolveTimezone } from '../api/timezone'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { useLocation } from '../context/LocationContext'
 
@@ -13,6 +14,7 @@ export function LocationSearch() {
   const [results, setResults] = useState<GeocodingResult[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isResolvingTimezone, setIsResolvingTimezone] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const debouncedQuery = useDebouncedValue(query, 400)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -51,11 +53,24 @@ export function LocationSearch() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  function handleSelect(result: GeocodingResult) {
-    setLocation(result)
+  async function handleSelect(result: GeocodingResult) {
     setQuery('')
     setResults([])
     setIsOpen(false)
+    setIsResolvingTimezone(true)
+    setError(null)
+
+    try {
+      const timezone = await resolveTimezone(result.latitude, result.longitude)
+      setLocation({ ...result, timezone })
+    } catch {
+      // Sin huso horario resuelto, mostramos UTC antes que romper: es
+      // peor mostrar la hora equivocada en silencio, así que avisamos.
+      setLocation({ ...result, timezone: 'UTC' })
+      setError('No se pudo determinar el huso horario del lugar; se muestra en UTC.')
+    } finally {
+      setIsResolvingTimezone(false)
+    }
   }
 
   return (
@@ -65,7 +80,14 @@ export function LocationSearch() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => results.length > 0 && setIsOpen(true)}
-        placeholder={location ? location.displayName : 'Buscar una ciudad o dirección…'}
+        disabled={isResolvingTimezone}
+        placeholder={
+          isResolvingTimezone
+            ? 'Resolviendo huso horario…'
+            : location
+              ? location.displayName
+              : 'Buscar una ciudad o dirección…'
+        }
         aria-label="Buscar ubicación"
         style={{
           width: '100%',
@@ -131,11 +153,23 @@ export function LocationSearch() {
         </ul>
       )}
 
+      {!isOpen && error && (
+        <p style={{ margin: '0.25rem 0 0', fontSize: '0.75rem', color: 'var(--series-2)' }}>
+          {error}
+        </p>
+      )}
+
       <p style={{ margin: '0.25rem 0 0', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
         Datos de{' '}
         <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
           OpenStreetMap
         </a>
+        {location && (
+          <>
+            {' '}
+            · hora local: <strong>{location.timezone}</strong>
+          </>
+        )}
       </p>
     </div>
   )
