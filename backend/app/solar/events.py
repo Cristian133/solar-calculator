@@ -14,13 +14,26 @@ orden de segundos, muy por debajo de la precisión que necesita esta app.
 Convención de longitud: positiva al este (a diferencia del propio libro de
 Meeus, que la toma positiva al oeste), por ser la convención moderna más
 intuitiva (coincide, por ejemplo, con la de coordenadas GPS).
+
+Vectorización: `_solar_transit_jd`, `_hour_angle_at_altitude` y
+`_refine_horizon_crossing` operan con `numpy` y no con ramas de Python
+(`if`/`return None`), así que funcionan igual con un `jd0` escalar (un
+día — usado por `solar_transit`/`sunrise_sunset`) o con un array de numpy
+(todos los días de un año a la vez — usado por `sunrise_sunset_year`, base
+del endpoint `GET /sol/anual`). Es el mismo cálculo en los dos casos: no
+hay una versión "vectorizada" separada de la versión "de un día".
 """
 
-import math
+import calendar
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
-from app.solar.coordinates import declination, right_ascension
+import numpy as np
+
+from app.solar.coordinates import declination, radius_vector, right_ascension
+from app.solar.horizontal import altitude, azimuth, hour_angle, local_sidereal_time
+from app.solar.irradiance import clear_sky_irradiance
+from app.solar.refraction import apparent_altitude as refracted_altitude
 from app.solar.time import datetime_from_julian_day, julian_century, julian_day, mean_sidereal_time
 
 STANDARD_ALTITUDE_SUN = -0.8333
@@ -46,60 +59,143 @@ class SunDay:
     always_above: bool | None
 
 
-def _wrap180(angle_deg: float) -> float:
-    """Normaliza un ángulo a (-180, 180]."""
-    return (angle_deg + 180) % 360 - 180
+@dataclass(frozen=True)
+class SunTrajectory:
+    """Trayectoria del Sol (altitud y azimut) a lo largo de un día,
+    muestreada en instantes UT equiespaciados — base del gráfico polar del
+    punto 3 (trayectoria/posición del Sol).
+
+    `altitude` es la altitud verdadera (geométrica, sin refracción);
+    `apparent_altitude` es la que realmente se vería (con la corrección de
+    `app.solar.refraction` — más notoria cerca del horizonte). `times`
+    cubre exactamente las 24h del día (el primer instante es 0h UT; el
+    último es 0h menos un paso de muestreo, sin repetir las 0h del día
+    siguiente)."""
+
+    times: list[datetime]
+    altitude: list[float]
+    apparent_altitude: list[float]
+    azimuth: list[float]
 
 
-def _hour_angle(jd: float, longitude_deg: float) -> float:
+@dataclass(frozen=True)
+class SolarNoon:
+    """Mediodía solar (tránsito) y la inclinación del Sol en ese instante
+    — punto 4 del plan técnico.
+
+    `altitude_deg` es la altitud verdadera máxima del día (H=0 por
+    definición de tránsito); `apparent_altitude_deg` es la que realmente
+    se vería (corrección de `app.solar.refraction`). `azimuth_deg` es 0°
+    (Norte) o 180° (Sur) salvo en el caso límite en que el Sol pasa
+    exactamente por el cenit (ver `app.solar.horizontal.azimuth`)."""
+
+    transit: datetime
+    altitude_deg: float
+    apparent_altitude_deg: float
+    azimuth_deg: float
+
+
+@dataclass(frozen=True)
+class SunYear:
+    """Eventos solares de todos los días de un año calendario, para un
+    observador dado — la versión vectorizada de `SunDay` que usa el
+    endpoint `GET /sol/anual`. Cada lista tiene un elemento por día del
+    año, en el mismo orden que `dates`."""
+
+    dates: list[date]
+    transit: list[datetime]
+    sunrise: list[datetime | None]
+    sunset: list[datetime | None]
+    always_above: list[bool | None]
+
+
+@dataclass(frozen=True)
+class DailyIrradiation:
+    """Irradiancia solar (cielo despejado) a lo largo de un día y su
+    integral — energía recibida por m² en el día. Punto 5 del plan
+    técnico, endpoint `GET /sol/irradiancia`.
+    """
+
+    times: list[datetime]
+    power_w_per_m2: list[float]
+    energy_wh_per_m2: float
+
+
+def _sun_hour_angle(jd, longitude_deg):
     """Ángulo horario (H) del Sol en `jd`, en grados, normalizado a
-    (-180, 180]. Positivo del mediodía solar hacia adelante (tarde)."""
+    (-180, 180]. Positivo del mediodía solar hacia adelante (tarde).
+
+    `jd` puede ser un float o un array de numpy."""
     t = julian_century(jd)
     alpha = right_ascension(t)
-    theta0 = mean_sidereal_time(jd)
-    return _wrap180(theta0 + longitude_deg - alpha)
+    lst = local_sidereal_time(mean_sidereal_time(jd), longitude_deg)
+    return hour_angle(lst, alpha)
 
 
-def _altitude(latitude_deg: float, declination_deg: float, hour_angle_deg: float) -> float:
-    """Altitud del Sol sobre el horizonte, en grados, dados latitud,
-    declinación y ángulo horario."""
-    phi = math.radians(latitude_deg)
-    delta = math.radians(declination_deg)
-    h = math.radians(hour_angle_deg)
-    sin_altitude = math.sin(phi) * math.sin(delta) + math.cos(phi) * math.cos(delta) * math.cos(h)
-    return math.degrees(math.asin(sin_altitude))
+def _hour_angle_at_altitude(latitude_deg, declination_deg, altitude_deg):
+    """H0 (grados): semiarco diurno al que el Sol cruza `altitude_deg` para
+    la latitud y declinación dadas, y las máscaras de los casos límite en
+    que no la cruza ese día.
 
-
-def _hour_angle_at_altitude(
-    latitude_deg: float, declination_deg: float, altitude_deg: float
-) -> float | None:
-    """H0 (grados, en [0, 180]): semiarco diurno al que el Sol cruza
-    `altitude_deg` para la latitud y declinación dadas.
-
-    `None` si el Sol no cruza esa altitud ese día — circumpolar (siempre
-    por encima) o nunca visible (siempre por debajo); distinguir cuál es
-    responsabilidad de quien llama, comparando con la altitud a mediodía.
+    `declination_deg` puede ser un float o un array de numpy. Devuelve
+    `(h0, always_above, always_below)`: `h0` siempre queda acotado a
+    [0, 180] (no debe usarse donde `always_above`/`always_below` sean
+    verdaderos — el Sol no cruza `altitude_deg` ese día: circumpolar,
+    siempre por encima, o nunca visible, siempre por debajo).
     """
-    phi = math.radians(latitude_deg)
-    delta = math.radians(declination_deg)
-    cos_h0 = (math.sin(math.radians(altitude_deg)) - math.sin(phi) * math.sin(delta)) / (
-        math.cos(phi) * math.cos(delta)
+    phi = np.radians(latitude_deg)
+    delta = np.radians(declination_deg)
+    cos_h0 = (np.sin(np.radians(altitude_deg)) - np.sin(phi) * np.sin(delta)) / (
+        np.cos(phi) * np.cos(delta)
     )
-    if cos_h0 < -1 or cos_h0 > 1:
-        return None
-    return math.degrees(math.acos(cos_h0))
+    always_above = cos_h0 < -1.0
+    always_below = cos_h0 > 1.0
+    h0 = np.degrees(np.arccos(np.clip(cos_h0, -1.0, 1.0)))
+    return h0, always_above, always_below
+
+
+def _solar_transit_jd(jd0, longitude_deg):
+    """JD del tránsito solar. `jd0` (JD a 0h UT) puede ser un float o un
+    array de numpy."""
+    m = (0.5 - longitude_deg / 360) % 1
+    for _ in range(_MAX_ITERATIONS):
+        m = m - _sun_hour_angle(jd0 + m, longitude_deg) / 360
+    return jd0 + m
+
+
+def _refine_horizon_crossing(jd0, m_initial, latitude_deg, longitude_deg, altitude_deg):
+    """Refina por iteración el instante (fracción de día `m` desde `jd0`)
+    en que el Sol cruza `altitude_deg`, y devuelve el JD resultante.
+
+    `jd0`/`m_initial` pueden ser floats o arrays de numpy. No hace falta
+    protegerse de `sin(H) == 0` (división por cero) de forma especial: en
+    los días límite (circumpolares) el resultado que salga de acá se
+    descarta igual, y para un día normal esa condición nunca se da
+    exactamente en punto flotante — se silencian los warnings de numpy
+    por las dudas.
+    """
+    m = m_initial
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for _ in range(_MAX_ITERATIONS):
+            jd = jd0 + m
+            t = julian_century(jd)
+            delta_deg = declination(t)
+            h_deg = _sun_hour_angle(jd, longitude_deg)
+            current_altitude = altitude(latitude_deg, delta_deg, h_deg)
+
+            cos_delta = np.cos(np.radians(delta_deg))
+            cos_phi = np.cos(np.radians(latitude_deg))
+            sin_h = np.sin(np.radians(h_deg))
+            m = m + (current_altitude - altitude_deg) / (360 * cos_delta * cos_phi * sin_h)
+
+    return jd0 + m
 
 
 def solar_transit(day: date, longitude_deg: float) -> datetime:
     """Instante (UT) del tránsito solar (mediodía solar aparente) para la
     fecha y longitud (positiva al este) dadas."""
     jd0 = julian_day(datetime(day.year, day.month, day.day, tzinfo=UTC))
-    m = (0.5 - longitude_deg / 360) % 1
-
-    for _ in range(_MAX_ITERATIONS):
-        m -= _hour_angle(jd0 + m, longitude_deg) / 360
-
-    return datetime_from_julian_day(jd0 + m)
+    return datetime_from_julian_day(float(_solar_transit_jd(jd0, longitude_deg)))
 
 
 def sunrise_sunset(
@@ -112,53 +208,180 @@ def sunrise_sunset(
     al este) dadas, a la altitud aparente `altitude_deg` (por defecto,
     `STANDARD_ALTITUDE_SUN`)."""
     jd0 = julian_day(datetime(day.year, day.month, day.day, tzinfo=UTC))
-    transit = solar_transit(day, longitude_deg)
-    m_transit = julian_day(transit) - jd0
+    transit_jd = float(_solar_transit_jd(jd0, longitude_deg))
+    transit = datetime_from_julian_day(transit_jd)
+    m_transit = transit_jd - jd0
 
-    delta_at_transit = declination(julian_century(jd0 + m_transit))
-    h0 = _hour_angle_at_altitude(latitude_deg, delta_at_transit, altitude_deg)
+    delta_at_transit = float(declination(julian_century(transit_jd)))
+    h0, always_above, always_below = _hour_angle_at_altitude(
+        latitude_deg, delta_at_transit, altitude_deg
+    )
 
-    if h0 is None:
-        altitude_at_transit = _altitude(latitude_deg, delta_at_transit, 0.0)
-        return SunDay(
-            transit=transit,
-            sunrise=None,
-            sunset=None,
-            always_above=altitude_at_transit > altitude_deg,
+    if bool(always_above) or bool(always_below):
+        return SunDay(transit=transit, sunrise=None, sunset=None, always_above=bool(always_above))
+
+    h0 = float(h0)
+    sunrise_jd = float(
+        _refine_horizon_crossing(
+            jd0, m_transit - h0 / 360, latitude_deg, longitude_deg, altitude_deg
         )
-
-    sunrise = _refine_horizon_crossing(
-        jd0, m_transit - h0 / 360, latitude_deg, longitude_deg, altitude_deg
     )
-    sunset = _refine_horizon_crossing(
-        jd0, m_transit + h0 / 360, latitude_deg, longitude_deg, altitude_deg
+    sunset_jd = float(
+        _refine_horizon_crossing(
+            jd0, m_transit + h0 / 360, latitude_deg, longitude_deg, altitude_deg
+        )
     )
-    return SunDay(transit=transit, sunrise=sunrise, sunset=sunset, always_above=None)
+    return SunDay(
+        transit=transit,
+        sunrise=datetime_from_julian_day(sunrise_jd),
+        sunset=datetime_from_julian_day(sunset_jd),
+        always_above=None,
+    )
 
 
-def _refine_horizon_crossing(
-    jd0: float,
-    m_initial: float,
+def sunrise_sunset_year(
+    year: int,
     latitude_deg: float,
     longitude_deg: float,
-    altitude_deg: float,
-) -> datetime:
-    """Refina por iteración el instante (fracción de día `m` desde `jd0`) en
-    que el Sol cruza `altitude_deg`, y lo devuelve como `datetime` UT."""
-    m = m_initial
+    altitude_deg: float = STANDARD_ALTITUDE_SUN,
+) -> SunYear:
+    """Igual que `sunrise_sunset`, pero para los 365/366 días de `year` a
+    la vez, vectorizado con numpy: toda la cadena de cálculo
+    (`coordinates.py`, `horizontal.py`, este módulo) opera sobre un array
+    con un elemento por día del año en lugar de iterar día a día en Python
+    puro. Base del endpoint `GET /sol/anual`."""
+    days_in_year = 366 if calendar.isleap(year) else 365
+    jan1 = julian_day(datetime(year, 1, 1, tzinfo=UTC))
+    jd0 = jan1 + np.arange(days_in_year, dtype=float)
 
-    for _ in range(_MAX_ITERATIONS):
-        jd = jd0 + m
-        t = julian_century(jd)
-        delta_deg = declination(t)
-        h_deg = _hour_angle(jd, longitude_deg)
-        altitude = _altitude(latitude_deg, delta_deg, h_deg)
+    transit_jd = _solar_transit_jd(jd0, longitude_deg)
+    m_transit = transit_jd - jd0
 
-        sin_h = math.sin(math.radians(h_deg))
-        if sin_h == 0:
-            break
-        cos_delta = math.cos(math.radians(delta_deg))
-        cos_phi = math.cos(math.radians(latitude_deg))
-        m += (altitude - altitude_deg) / (360 * cos_delta * cos_phi * sin_h)
+    delta_at_transit = declination(julian_century(transit_jd))
+    h0, always_above, always_below = _hour_angle_at_altitude(
+        latitude_deg, delta_at_transit, altitude_deg
+    )
+    polar = always_above | always_below
 
-    return datetime_from_julian_day(jd0 + m)
+    sunrise_jd = _refine_horizon_crossing(
+        jd0, m_transit - h0 / 360, latitude_deg, longitude_deg, altitude_deg
+    )
+    sunset_jd = _refine_horizon_crossing(
+        jd0, m_transit + h0 / 360, latitude_deg, longitude_deg, altitude_deg
+    )
+
+    # La conversión final a `datetime` es, a propósito, el único paso que
+    # queda como un loop de Python: opera sobre ~365 floats ya calculados,
+    # no sobre el motor de cálculo en sí (eso es lo que se vectorizó).
+    dates = [date(year, 1, 1) + timedelta(days=i) for i in range(days_in_year)]
+    transit = [datetime_from_julian_day(float(jd)) for jd in transit_jd]
+    sunrise = [
+        None if is_polar else datetime_from_julian_day(float(jd))
+        for is_polar, jd in zip(polar, sunrise_jd, strict=True)
+    ]
+    sunset = [
+        None if is_polar else datetime_from_julian_day(float(jd))
+        for is_polar, jd in zip(polar, sunset_jd, strict=True)
+    ]
+    always_above_list = [
+        bool(above) if is_polar else None
+        for is_polar, above in zip(polar, always_above, strict=True)
+    ]
+
+    return SunYear(
+        dates=dates,
+        transit=transit,
+        sunrise=sunrise,
+        sunset=sunset,
+        always_above=always_above_list,
+    )
+
+
+def sun_trajectory(
+    day: date,
+    latitude_deg: float,
+    longitude_deg: float,
+    num_samples: int = 96,
+) -> SunTrajectory:
+    """Trayectoria del Sol (altitud y azimut) a lo largo de `day`, en
+    `num_samples` instantes UT equiespaciados (por defecto 96 = cada 15
+    minutos), vectorizado con numpy. Base del endpoint `GET /sol/trayectoria`
+    (punto 3, gráfico polar).
+
+    No hace falta iterar como en `sunrise_sunset`/`solar_transit`: cada
+    muestra es una evaluación directa e independiente de la posición solar
+    en un instante conocido, así que alcanza con componer las funciones
+    públicas de `coordinates.py` y `horizontal.py`.
+    """
+    jd0 = julian_day(datetime(day.year, day.month, day.day, tzinfo=UTC))
+    jd = jd0 + np.arange(num_samples, dtype=float) / num_samples
+
+    t = julian_century(jd)
+    alpha = right_ascension(t)
+    delta = declination(t)
+    lst = local_sidereal_time(mean_sidereal_time(jd), longitude_deg)
+    h = hour_angle(lst, alpha)
+
+    alt = altitude(latitude_deg, delta, h)
+    az = azimuth(latitude_deg, delta, h)
+    apparent_alt = refracted_altitude(alt)
+
+    times = [datetime_from_julian_day(float(x)) for x in jd]
+    return SunTrajectory(
+        times=times,
+        altitude=[float(x) for x in alt],
+        apparent_altitude=[float(x) for x in apparent_alt],
+        azimuth=[float(x) for x in az],
+    )
+
+
+def solar_noon(day: date, latitude_deg: float, longitude_deg: float) -> SolarNoon:
+    """Mediodía solar aparente y la inclinación del Sol en ese instante
+    (punto 4): altitud máxima del día y azimut, evaluadas en H=0 por
+    definición de tránsito."""
+    transit = solar_transit(day, longitude_deg)
+    delta = float(declination(julian_century(julian_day(transit))))
+    altitude_deg = float(altitude(latitude_deg, delta, 0.0))
+    return SolarNoon(
+        transit=transit,
+        altitude_deg=altitude_deg,
+        apparent_altitude_deg=float(refracted_altitude(altitude_deg)),
+        azimuth_deg=float(azimuth(latitude_deg, delta, 0.0)),
+    )
+
+
+def daily_irradiation(
+    day: date,
+    latitude_deg: float,
+    longitude_deg: float,
+    num_samples: int = 96,
+) -> DailyIrradiation:
+    """Irradiancia solar (cielo despejado, `app.solar.irradiance`)
+    muestreada a lo largo de `day`, y la energía total recibida por m² en
+    el día (regla del trapecio sobre las muestras, cerrando el día a las
+    24h). Punto 5, endpoint `GET /sol/irradiancia`.
+
+    Reusa `sun_trajectory` para la altitud en cada muestra (mismos
+    instantes) y solo agrega el radio vector Tierra-Sol, que es lo único
+    que le falta a `irradiance.clear_sky_irradiance`.
+    """
+    trajectory = sun_trajectory(day, latitude_deg, longitude_deg, num_samples)
+
+    jd0 = julian_day(datetime(day.year, day.month, day.day, tzinfo=UTC))
+    jd = jd0 + np.arange(num_samples, dtype=float) / num_samples
+    r = radius_vector(julian_century(jd))
+    power = clear_sky_irradiance(np.array(trajectory.altitude), r)
+
+    # Regla del trapecio sobre las 24h, cerrando el ciclo con una muestra
+    # más a las 24h (prácticamente igual a la de las 0h: el cambio
+    # orbital/de declinación en un día es despreciable a esta precisión).
+    hours = np.arange(num_samples, dtype=float) * (24 / num_samples)
+    hours_closed = np.append(hours, 24.0)
+    power_closed = np.append(power, power[0])
+    energy_wh = float(np.trapezoid(power_closed, hours_closed))
+
+    return DailyIrradiation(
+        times=trajectory.times,
+        power_w_per_m2=[float(x) for x in power],
+        energy_wh_per_m2=energy_wh,
+    )
