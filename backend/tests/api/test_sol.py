@@ -63,3 +63,51 @@ def test_anual_rejects_out_of_range_longitude() -> None:
 def test_anual_requires_all_query_params() -> None:
     response = client.get("/sol/anual", params={"latitude": 0.0, "longitude": 0.0})
     assert response.status_code == 422
+
+
+def test_trayectoria_returns_default_96_samples_covering_the_day() -> None:
+    response = client.get(
+        "/sol/trayectoria",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-06-01"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["latitude"] == -34.6
+    assert body["longitude"] == -58.4
+    assert body["date"] == "2024-06-01"
+    assert len(body["samples"]) == 96
+    assert body["samples"][0]["time"] == "2024-06-01T00:00:00Z"
+    assert body["samples"][-1]["time"] == "2024-06-01T23:45:00Z"
+    for sample in body["samples"]:
+        assert -90 <= sample["altitude"] <= 90
+        assert 0 <= sample["azimuth"] < 360
+
+
+def test_trayectoria_respects_custom_num_samples() -> None:
+    response = client.get(
+        "/sol/trayectoria",
+        params={"latitude": 0.0, "longitude": 0.0, "date": "2024-03-20", "num_samples": 24},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["samples"]) == 24
+
+
+def test_trayectoria_rejects_num_samples_out_of_range() -> None:
+    response = client.get(
+        "/sol/trayectoria",
+        params={"latitude": 0.0, "longitude": 0.0, "date": "2024-03-20", "num_samples": 1000},
+    )
+    assert response.status_code == 422
+
+
+def test_trayectoria_rejects_out_of_range_latitude() -> None:
+    response = client.get(
+        "/sol/trayectoria",
+        params={"latitude": 91.0, "longitude": 0.0, "date": "2024-03-20"},
+    )
+    assert response.status_code == 422
+
+
+def test_trayectoria_requires_date() -> None:
+    response = client.get("/sol/trayectoria", params={"latitude": 0.0, "longitude": 0.0})
+    assert response.status_code == 422

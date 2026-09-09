@@ -3,13 +3,19 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 import pytest
 
+from app.solar.coordinates import declination, right_ascension
 from app.solar.events import (
     STANDARD_ALTITUDE_SUN,
     _hour_angle_at_altitude,
     solar_transit,
+    sun_trajectory,
     sunrise_sunset,
     sunrise_sunset_year,
 )
+from app.solar.horizontal import altitude as horizontal_altitude
+from app.solar.horizontal import azimuth as horizontal_azimuth
+from app.solar.horizontal import hour_angle, local_sidereal_time
+from app.solar.time import julian_century, julian_day, mean_sidereal_time
 
 # --- Identidades exactas de las funciones auxiliares -----------------------
 # El día-largo clásico: cos(H0) = -tan(latitud) * tan(declinación), con
@@ -152,3 +158,50 @@ def test_sunrise_sunset_year_matches_day_by_day_scalar_calls(
 def test_sunrise_sunset_year_length_matches_calendar_year() -> None:
     assert len(sunrise_sunset_year(2023, 0.0, 0.0).dates) == 365  # no bisiesto
     assert len(sunrise_sunset_year(2024, 0.0, 0.0).dates) == 366  # bisiesto
+
+
+# --- sun_trajectory ----------------------------------------------------
+
+
+def test_sun_trajectory_covers_24h_at_requested_resolution() -> None:
+    day = date(2024, 6, 1)
+    result = sun_trajectory(day, latitude_deg=-34.6, longitude_deg=-58.4, num_samples=96)
+
+    assert len(result.times) == 96
+    assert len(result.altitude) == 96
+    assert len(result.azimuth) == 96
+    assert result.times[0] == datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
+    # El último instante es 15' antes de la medianoche siguiente (24h/96).
+    assert result.times[-1] == datetime(2024, 6, 1, 23, 45, tzinfo=UTC)
+
+
+def test_sun_trajectory_matches_manual_composition_of_public_functions() -> None:
+    # Regresión: sun_trajectory no es más que componer coordinates.py y
+    # horizontal.py directamente en cada instante muestreado.
+    day = date(2024, 3, 20)
+    lat, lon = 40.4, -3.7
+    result = sun_trajectory(day, lat, lon, num_samples=48)
+
+    for i, time in enumerate(result.times):
+        jd = julian_day(time)
+        t = julian_century(jd)
+        alpha = right_ascension(t)
+        delta = declination(t)
+        lst = local_sidereal_time(mean_sidereal_time(jd), lon)
+        h = hour_angle(lst, alpha)
+
+        assert result.altitude[i] == pytest.approx(horizontal_altitude(lat, delta, h))
+        assert result.azimuth[i] == pytest.approx(horizontal_azimuth(lat, delta, h))
+
+
+def test_sun_trajectory_max_altitude_near_solar_transit() -> None:
+    day = date(2024, 3, 20)
+    lat, lon = 40.4, -3.7
+    num_samples = 96
+    result = sun_trajectory(day, lat, lon, num_samples=num_samples)
+
+    transit = solar_transit(day, lon)
+    peak_time = result.times[max(range(num_samples), key=lambda i: result.altitude[i])]
+
+    sampling_step = timedelta(hours=24 / num_samples)
+    assert abs((peak_time - transit).total_seconds()) <= sampling_step.total_seconds()

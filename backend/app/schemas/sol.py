@@ -29,3 +29,21 @@ class AnnualSunResponse(BaseModel):
     longitude: float
     year: int
     days: list[DailySun]
+
+
+class SunPosition(BaseModel):
+    """Posición del Sol (altitud/azimut) en un instante dado."""
+
+    time: datetime
+    altitude: float
+    azimuth: float
+
+
+class TrajectoryResponse(BaseModel):
+    """Trayectoria del Sol a lo largo de un día, para una ubicación —
+    base del gráfico polar del punto 3."""
+
+    latitude: float
+    longitude: float
+    date: date
+    samples: list[SunPosition]

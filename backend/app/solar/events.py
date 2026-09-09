@@ -31,7 +31,7 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 
 from app.solar.coordinates import declination, right_ascension
-from app.solar.horizontal import altitude, hour_angle, local_sidereal_time
+from app.solar.horizontal import altitude, azimuth, hour_angle, local_sidereal_time
 from app.solar.time import datetime_from_julian_day, julian_century, julian_day, mean_sidereal_time
 
 STANDARD_ALTITUDE_SUN = -0.8333
@@ -55,6 +55,21 @@ class SunDay:
     sunrise: datetime | None
     sunset: datetime | None
     always_above: bool | None
+
+
+@dataclass(frozen=True)
+class SunTrajectory:
+    """Trayectoria del Sol (altitud y azimut) a lo largo de un día,
+    muestreada en instantes UT equiespaciados — base del gráfico polar del
+    punto 3 (trayectoria/posición del Sol).
+
+    `times` cubre exactamente las 24h del día (el primer instante es 0h
+    UT; el último es 0h menos un paso de muestreo, sin repetir las 0h del
+    día siguiente)."""
+
+    times: list[datetime]
+    altitude: list[float]
+    azimuth: list[float]
 
 
 @dataclass(frozen=True)
@@ -244,4 +259,40 @@ def sunrise_sunset_year(
         sunrise=sunrise,
         sunset=sunset,
         always_above=always_above_list,
+    )
+
+
+def sun_trajectory(
+    day: date,
+    latitude_deg: float,
+    longitude_deg: float,
+    num_samples: int = 96,
+) -> SunTrajectory:
+    """Trayectoria del Sol (altitud y azimut) a lo largo de `day`, en
+    `num_samples` instantes UT equiespaciados (por defecto 96 = cada 15
+    minutos), vectorizado con numpy. Base del endpoint `GET /sol/trayectoria`
+    (punto 3, gráfico polar).
+
+    No hace falta iterar como en `sunrise_sunset`/`solar_transit`: cada
+    muestra es una evaluación directa e independiente de la posición solar
+    en un instante conocido, así que alcanza con componer las funciones
+    públicas de `coordinates.py` y `horizontal.py`.
+    """
+    jd0 = julian_day(datetime(day.year, day.month, day.day, tzinfo=UTC))
+    jd = jd0 + np.arange(num_samples, dtype=float) / num_samples
+
+    t = julian_century(jd)
+    alpha = right_ascension(t)
+    delta = declination(t)
+    lst = local_sidereal_time(mean_sidereal_time(jd), longitude_deg)
+    h = hour_angle(lst, alpha)
+
+    alt = altitude(latitude_deg, delta, h)
+    az = azimuth(latitude_deg, delta, h)
+
+    times = [datetime_from_julian_day(float(x)) for x in jd]
+    return SunTrajectory(
+        times=times,
+        altitude=[float(x) for x in alt],
+        azimuth=[float(x) for x in az],
     )
