@@ -46,6 +46,4 @@ Los algoritmos astronómicos se basan en *Astronomical Algorithms* (2nd ed.) y
 *(More) Mathematical Astronomy Morsels* de Jean Meeus, con *Fundamentals of
 Celestial Mechanics* (Danby), *Methods of Astrodynamics* (Vallado) y el
 *Explanatory Supplement to the Astronomical Almanac* como referencias de
-respaldo. Estos libros no son de dominio público — se usan como referencia
-técnica para implementaciones propias, no se reproduce su contenido en este
-repositorio.
+respaldo.

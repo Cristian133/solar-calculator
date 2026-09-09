@@ -1,0 +1,35 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  # Mismo pin que backend/requirements-dev.txt: evita drift entre el hook y
+  # el ruff que corre en CI/local.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.3
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  # Hook local (no sandboxed por pre-commit): usa el pytest del venv de
+  # backend si existe (caso normal en desarrollo local); si no, cae a
+  # `python3 -m pytest` del PATH activo (requiere requirements-dev.txt
+  # instalado ahí).
+  - repo: local
+    hooks:
+      - id: backend-tests
+        name: pytest (backend)
+        entry: >-
+          bash -c 'cd backend &&
+          if [ -x .venv/bin/pytest ]; then .venv/bin/pytest; else python3 -m pytest; fi'
+        language: system
+        files: ^backend/
+        pass_filenames: false
