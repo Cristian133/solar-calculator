@@ -2,27 +2,14 @@ import { useEffect, useState } from 'react'
 import { ApiError, getAnnualSun, getDailySun } from '../api/client'
 import type { AnnualSunResponse, DailySunResponse } from '../api/types'
 import { useLocation } from '../context/LocationContext'
+import { useDate } from '../context/DateContext'
+import { formatTime } from '../utils/date'
 import { AnnualDayLengthChart } from '../components/charts/AnnualDayLengthChart'
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-/** Formatea un instante (ISO, en UT) en la hora local del lugar
- * consultado — no la del navegador, que puede ser una zona horaria
- * distinta a la del lugar. */
-function formatTime(iso: string, timezone: string): string {
-  return new Date(iso).toLocaleTimeString('es-AR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: timezone,
-  })
-}
 
 /** Punto 1 (horas de sol de un día) + punto 2 (evolución anual). */
 export default function HorasDeSol() {
   const { location } = useLocation()
-  const [date, setDate] = useState(todayIso)
+  const { date } = useDate()
   const [year, setYear] = useState(() => new Date().getFullYear())
 
   const [daily, setDaily] = useState<DailySunResponse | null>(null)
@@ -58,11 +45,6 @@ export default function HorasDeSol() {
       <section>
         <h1 style={{ marginBottom: '0.25rem' }}>Horas de sol</h1>
         <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{location.displayName}</p>
-
-        <label style={{ display: 'block', marginBottom: '0.25rem' }}>
-          Fecha:{' '}
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
         <p style={{ margin: '0 0 1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
           Horarios en hora local del lugar ({location.timezone})
         </p>

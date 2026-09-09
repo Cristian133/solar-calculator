@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { LocationSearch } from './LocationSearch'
 import { useLocation } from '../context/LocationContext'
+import { useDate } from '../context/DateContext'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Horas de sol' },
@@ -11,6 +12,7 @@ const NAV_ITEMS = [
 
 export function Layout() {
   const { location } = useLocation()
+  const { date, setDate } = useDate()
 
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -47,7 +49,22 @@ export function Layout() {
           ))}
         </nav>
 
-        <div style={{ marginLeft: 'auto' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Fecha</span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              style={{
+                padding: '0.4rem 0.5rem',
+                borderRadius: '0.375rem',
+                border: '1px solid var(--axis)',
+                background: 'var(--surface-1)',
+                color: 'var(--text-primary)',
+              }}
+            />
+          </label>
           <LocationSearch />
         </div>
       </header>
