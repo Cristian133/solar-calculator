@@ -112,6 +112,7 @@ def mediodia(latitude: Latitude, longitude: Longitude, date: DateParam) -> Solar
         date=date,
         transit=result.transit,
         altitude_deg=result.altitude_deg,
+        apparent_altitude_deg=result.apparent_altitude_deg,
         azimuth_deg=result.azimuth_deg,
     )
 
@@ -130,8 +131,10 @@ def trayectoria(
     result = sun_trajectory(date, latitude, longitude, num_samples)
 
     samples = [
-        SunPosition(time=time, altitude=alt, azimuth=az)
-        for time, alt, az in zip(result.times, result.altitude, result.azimuth, strict=True)
+        SunPosition(time=time, altitude=alt, apparent_altitude=apparent_alt, azimuth=az)
+        for time, alt, apparent_alt, az in zip(
+            result.times, result.altitude, result.apparent_altitude, result.azimuth, strict=True
+        )
     ]
 
     return TrajectoryResponse(latitude=latitude, longitude=longitude, date=date, samples=samples)

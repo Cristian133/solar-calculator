@@ -17,6 +17,7 @@ from app.solar.events import (
 from app.solar.horizontal import altitude as horizontal_altitude
 from app.solar.horizontal import azimuth as horizontal_azimuth
 from app.solar.horizontal import hour_angle, local_sidereal_time
+from app.solar.refraction import apparent_altitude as refracted_altitude
 from app.solar.time import julian_century, julian_day, mean_sidereal_time
 
 # --- Identidades exactas de las funciones auxiliares -----------------------
@@ -171,6 +172,7 @@ def test_sun_trajectory_covers_24h_at_requested_resolution() -> None:
 
     assert len(result.times) == 96
     assert len(result.altitude) == 96
+    assert len(result.apparent_altitude) == 96
     assert len(result.azimuth) == 96
     assert result.times[0] == datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
     # El último instante es 15' antes de la medianoche siguiente (24h/96).
@@ -193,6 +195,7 @@ def test_sun_trajectory_matches_manual_composition_of_public_functions() -> None
         h = hour_angle(lst, alpha)
 
         assert result.altitude[i] == pytest.approx(horizontal_altitude(lat, delta, h))
+        assert result.apparent_altitude[i] == pytest.approx(refracted_altitude(result.altitude[i]))
         assert result.azimuth[i] == pytest.approx(horizontal_azimuth(lat, delta, h))
 
 
@@ -224,6 +227,19 @@ def test_solar_noon_altitude_matches_sun_trajectory_peak() -> None:
     noon = solar_noon(day, lat, lon)
     trajectory = sun_trajectory(day, lat, lon, num_samples=288)
     assert noon.altitude_deg == pytest.approx(max(trajectory.altitude), abs=0.05)
+
+
+def test_solar_noon_apparent_altitude_matches_refraction_module() -> None:
+    day, lat, lon = date(2024, 3, 20), 40.4, -3.7
+    noon = solar_noon(day, lat, lon)
+    assert noon.apparent_altitude_deg == pytest.approx(refracted_altitude(noon.altitude_deg))
+
+
+def test_solar_noon_apparent_altitude_is_above_true_altitude_near_horizon() -> None:
+    # A alta latitud en invierno el sol de mediodía está bajo, donde la
+    # refracción es más notoria: la altitud aparente debe ser mayor.
+    noon = solar_noon(date(2024, 12, 21), latitude_deg=65.0, longitude_deg=0.0)
+    assert noon.apparent_altitude_deg > noon.altitude_deg
 
 
 def test_solar_noon_azimuth_is_north_when_latitude_less_than_declination() -> None:

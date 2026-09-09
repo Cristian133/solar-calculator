@@ -33,6 +33,7 @@ import numpy as np
 from app.solar.coordinates import declination, radius_vector, right_ascension
 from app.solar.horizontal import altitude, azimuth, hour_angle, local_sidereal_time
 from app.solar.irradiance import clear_sky_irradiance
+from app.solar.refraction import apparent_altitude as refracted_altitude
 from app.solar.time import datetime_from_julian_day, julian_century, julian_day, mean_sidereal_time
 
 STANDARD_ALTITUDE_SUN = -0.8333
@@ -64,12 +65,16 @@ class SunTrajectory:
     muestreada en instantes UT equiespaciados — base del gráfico polar del
     punto 3 (trayectoria/posición del Sol).
 
-    `times` cubre exactamente las 24h del día (el primer instante es 0h
-    UT; el último es 0h menos un paso de muestreo, sin repetir las 0h del
-    día siguiente)."""
+    `altitude` es la altitud verdadera (geométrica, sin refracción);
+    `apparent_altitude` es la que realmente se vería (con la corrección de
+    `app.solar.refraction` — más notoria cerca del horizonte). `times`
+    cubre exactamente las 24h del día (el primer instante es 0h UT; el
+    último es 0h menos un paso de muestreo, sin repetir las 0h del día
+    siguiente)."""
 
     times: list[datetime]
     altitude: list[float]
+    apparent_altitude: list[float]
     azimuth: list[float]
 
 
@@ -78,13 +83,15 @@ class SolarNoon:
     """Mediodía solar (tránsito) y la inclinación del Sol en ese instante
     — punto 4 del plan técnico.
 
-    `altitude_deg` es la altitud máxima del día (H=0 por definición de
-    tránsito). `azimuth_deg` es 0° (Norte) o 180° (Sur) salvo en el caso
-    límite en que el Sol pasa exactamente por el cenit (ver
-    `app.solar.horizontal.azimuth`)."""
+    `altitude_deg` es la altitud verdadera máxima del día (H=0 por
+    definición de tránsito); `apparent_altitude_deg` es la que realmente
+    se vería (corrección de `app.solar.refraction`). `azimuth_deg` es 0°
+    (Norte) o 180° (Sur) salvo en el caso límite en que el Sol pasa
+    exactamente por el cenit (ver `app.solar.horizontal.azimuth`)."""
 
     transit: datetime
     altitude_deg: float
+    apparent_altitude_deg: float
     azimuth_deg: float
 
 
@@ -317,11 +324,13 @@ def sun_trajectory(
 
     alt = altitude(latitude_deg, delta, h)
     az = azimuth(latitude_deg, delta, h)
+    apparent_alt = refracted_altitude(alt)
 
     times = [datetime_from_julian_day(float(x)) for x in jd]
     return SunTrajectory(
         times=times,
         altitude=[float(x) for x in alt],
+        apparent_altitude=[float(x) for x in apparent_alt],
         azimuth=[float(x) for x in az],
     )
 
@@ -332,9 +341,11 @@ def solar_noon(day: date, latitude_deg: float, longitude_deg: float) -> SolarNoo
     definición de tránsito."""
     transit = solar_transit(day, longitude_deg)
     delta = float(declination(julian_century(julian_day(transit))))
+    altitude_deg = float(altitude(latitude_deg, delta, 0.0))
     return SolarNoon(
         transit=transit,
-        altitude_deg=float(altitude(latitude_deg, delta, 0.0)),
+        altitude_deg=altitude_deg,
+        apparent_altitude_deg=float(refracted_altitude(altitude_deg)),
         azimuth_deg=float(azimuth(latitude_deg, delta, 0.0)),
     )
 

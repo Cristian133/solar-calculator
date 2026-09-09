@@ -40,10 +40,15 @@ class DailySunResponse(DailySun):
 
 
 class SunPosition(BaseModel):
-    """Posición del Sol (altitud/azimut) en un instante dado."""
+    """Posición del Sol (altitud/azimut) en un instante dado.
+
+    `altitude` es la altitud verdadera (geométrica); `apparent_altitude`
+    es la que realmente se vería (corrección por refracción atmosférica,
+    más notoria cerca del horizonte)."""
 
     time: datetime
     altitude: float
+    apparent_altitude: float
     azimuth: float
 
 
@@ -60,14 +65,17 @@ class TrajectoryResponse(BaseModel):
 class SolarNoonResponse(BaseModel):
     """Mediodía solar e inclinación del Sol en ese instante (punto 4).
 
-    `altitude_deg` es la altitud máxima del día; `azimuth_deg` es 0°
-    (Norte) o 180° (Sur) salvo en el caso límite del Sol en el cenit."""
+    `altitude_deg` es la altitud verdadera máxima del día;
+    `apparent_altitude_deg` es la que realmente se vería (corrección por
+    refracción). `azimuth_deg` es 0° (Norte) o 180° (Sur) salvo en el caso
+    límite del Sol en el cenit."""
 
     latitude: float
     longitude: float
     date: date
     transit: datetime
     altitude_deg: float
+    apparent_altitude_deg: float
     azimuth_deg: float
 
 

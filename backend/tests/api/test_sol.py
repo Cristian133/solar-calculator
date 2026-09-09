@@ -81,6 +81,7 @@ def test_trayectoria_returns_default_96_samples_covering_the_day() -> None:
     assert body["samples"][-1]["time"] == "2024-06-01T23:45:00Z"
     for sample in body["samples"]:
         assert -90 <= sample["altitude"] <= 90
+        assert sample["apparent_altitude"] >= sample["altitude"]  # la refracción siempre "levanta"
         assert 0 <= sample["azimuth"] < 360
 
 
@@ -176,6 +177,7 @@ def test_mediodia_returns_transit_altitude_and_azimuth() -> None:
     assert body["date"] == "2024-06-01"
     assert body["transit"] is not None
     assert -90 <= body["altitude_deg"] <= 90
+    assert body["apparent_altitude_deg"] >= body["altitude_deg"]
     assert 0 <= body["azimuth_deg"] < 360
 
 
