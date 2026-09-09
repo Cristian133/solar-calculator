@@ -9,16 +9,24 @@ from app.schemas.sol import (
     AnnualSunResponse,
     DailySun,
     DailySunResponse,
+    IrradianceResponse,
+    IrradianceSample,
     SolarNoonResponse,
     SunPosition,
     TrajectoryResponse,
 )
-from app.solar.events import solar_noon, sun_trajectory, sunrise_sunset, sunrise_sunset_year
+from app.solar.events import (
+    daily_irradiation,
+    solar_noon,
+    sun_trajectory,
+    sunrise_sunset,
+    sunrise_sunset_year,
+)
 
 router = APIRouter()
 
-_MIN_TRAJECTORY_SAMPLES = 24
-_MAX_TRAJECTORY_SAMPLES = 288
+_MIN_SAMPLES = 24
+_MAX_SAMPLES = 288
 
 Latitude = Annotated[float, Query(ge=-90, le=90, description="Latitud del observador, en grados")]
 Longitude = Annotated[
@@ -26,6 +34,14 @@ Longitude = Annotated[
     Query(ge=-180, le=180, description="Longitud del observador, en grados (positiva al este)"),
 ]
 DateParam = Annotated[date_type, Query(description="Fecha (UTC)")]
+NumSamples = Annotated[
+    int,
+    Query(
+        ge=_MIN_SAMPLES,
+        le=_MAX_SAMPLES,
+        description="Cantidad de instantes a muestrear a lo largo del día (equiespaciados)",
+    ),
+]
 
 
 @router.get("/anual", response_model=AnnualSunResponse)
@@ -105,14 +121,7 @@ def trayectoria(
     latitude: Latitude,
     longitude: Longitude,
     date: DateParam,
-    num_samples: Annotated[
-        int,
-        Query(
-            ge=_MIN_TRAJECTORY_SAMPLES,
-            le=_MAX_TRAJECTORY_SAMPLES,
-            description="Cantidad de instantes a muestrear a lo largo del día (equiespaciados)",
-        ),
-    ] = 96,
+    num_samples: NumSamples = 96,
 ) -> TrajectoryResponse:
     """Trayectoria del Sol (altitud/azimut) a lo largo de un día (punto 3),
     para un gráfico polar. Incluye las 24h del día, no solo las horas de
@@ -126,3 +135,31 @@ def trayectoria(
     ]
 
     return TrajectoryResponse(latitude=latitude, longitude=longitude, date=date, samples=samples)
+
+
+@router.get("/irradiancia", response_model=IrradianceResponse)
+def irradiancia(
+    latitude: Latitude,
+    longitude: Longitude,
+    date: DateParam,
+    num_samples: NumSamples = 96,
+) -> IrradianceResponse:
+    """Irradiancia solar en cielo despejado a lo largo de un día (punto 5)
+    y la energía total recibida por m² en el día. Modelo teórico
+    simplificado (ver `app.solar.irradiance`): no tiene en cuenta nubosidad
+    real ni componente difusa.
+    """
+    result = daily_irradiation(date, latitude, longitude, num_samples)
+
+    samples = [
+        IrradianceSample(time=time, power_w_per_m2=power)
+        for time, power in zip(result.times, result.power_w_per_m2, strict=True)
+    ]
+
+    return IrradianceResponse(
+        latitude=latitude,
+        longitude=longitude,
+        date=date,
+        energy_wh_per_m2=result.energy_wh_per_m2,
+        samples=samples,
+    )

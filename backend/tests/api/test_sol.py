@@ -203,3 +203,53 @@ def test_mediodia_azimuth_is_north_in_buenos_aires_december() -> None:
 def test_mediodia_requires_date() -> None:
     response = client.get("/sol/mediodia", params={"latitude": 0.0, "longitude": 0.0})
     assert response.status_code == 422
+
+
+def test_irradiancia_returns_samples_and_positive_energy() -> None:
+    response = client.get(
+        "/sol/irradiancia",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-06-01"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["latitude"] == -34.6
+    assert body["longitude"] == -58.4
+    assert body["date"] == "2024-06-01"
+    assert body["energy_wh_per_m2"] > 0
+    assert len(body["samples"]) == 96
+    assert all(s["power_w_per_m2"] >= 0 for s in body["samples"])
+    assert any(s["power_w_per_m2"] == 0 for s in body["samples"])  # de noche
+    assert any(s["power_w_per_m2"] > 0 for s in body["samples"])  # de día
+
+
+def test_irradiancia_zero_energy_during_polar_night() -> None:
+    response = client.get(
+        "/sol/irradiancia",
+        params={"latitude": 80.0, "longitude": 0.0, "date": "2024-12-21"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["energy_wh_per_m2"] == 0.0
+    assert all(s["power_w_per_m2"] == 0.0 for s in body["samples"])
+
+
+def test_irradiancia_respects_custom_num_samples() -> None:
+    response = client.get(
+        "/sol/irradiancia",
+        params={"latitude": 0.0, "longitude": 0.0, "date": "2024-03-20", "num_samples": 24},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["samples"]) == 24
+
+
+def test_irradiancia_rejects_out_of_range_latitude() -> None:
+    response = client.get(
+        "/sol/irradiancia",
+        params={"latitude": 91.0, "longitude": 0.0, "date": "2024-03-20"},
+    )
+    assert response.status_code == 422
+
+
+def test_irradiancia_requires_date() -> None:
+    response = client.get("/sol/irradiancia", params={"latitude": 0.0, "longitude": 0.0})
+    assert response.status_code == 422

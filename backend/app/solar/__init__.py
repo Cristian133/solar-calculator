@@ -10,5 +10,5 @@ Módulos (ver docs/plan_tecnico.md, sección 4):
 - events.py: orto, tránsito y ocaso (Meeus, cap. 15). Hecho.
 - refraction.py: refracción atmosférica (Meeus, cap. 16). Pendiente.
 - irradiance.py: irradiancia de cielo despejado (fuente de respaldo, no
-  Meeus). Pendiente.
+  Meeus; modelo Kasten-Young + Meinel & Meinel). Hecho.
 """

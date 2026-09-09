@@ -30,8 +30,9 @@ from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
-from app.solar.coordinates import declination, right_ascension
+from app.solar.coordinates import declination, radius_vector, right_ascension
 from app.solar.horizontal import altitude, azimuth, hour_angle, local_sidereal_time
+from app.solar.irradiance import clear_sky_irradiance
 from app.solar.time import datetime_from_julian_day, julian_century, julian_day, mean_sidereal_time
 
 STANDARD_ALTITUDE_SUN = -0.8333
@@ -99,6 +100,18 @@ class SunYear:
     sunrise: list[datetime | None]
     sunset: list[datetime | None]
     always_above: list[bool | None]
+
+
+@dataclass(frozen=True)
+class DailyIrradiation:
+    """Irradiancia solar (cielo despejado) a lo largo de un día y su
+    integral — energía recibida por m² en el día. Punto 5 del plan
+    técnico, endpoint `GET /sol/irradiancia`.
+    """
+
+    times: list[datetime]
+    power_w_per_m2: list[float]
+    energy_wh_per_m2: float
 
 
 def _sun_hour_angle(jd, longitude_deg):
@@ -323,4 +336,41 @@ def solar_noon(day: date, latitude_deg: float, longitude_deg: float) -> SolarNoo
         transit=transit,
         altitude_deg=float(altitude(latitude_deg, delta, 0.0)),
         azimuth_deg=float(azimuth(latitude_deg, delta, 0.0)),
+    )
+
+
+def daily_irradiation(
+    day: date,
+    latitude_deg: float,
+    longitude_deg: float,
+    num_samples: int = 96,
+) -> DailyIrradiation:
+    """Irradiancia solar (cielo despejado, `app.solar.irradiance`)
+    muestreada a lo largo de `day`, y la energía total recibida por m² en
+    el día (regla del trapecio sobre las muestras, cerrando el día a las
+    24h). Punto 5, endpoint `GET /sol/irradiancia`.
+
+    Reusa `sun_trajectory` para la altitud en cada muestra (mismos
+    instantes) y solo agrega el radio vector Tierra-Sol, que es lo único
+    que le falta a `irradiance.clear_sky_irradiance`.
+    """
+    trajectory = sun_trajectory(day, latitude_deg, longitude_deg, num_samples)
+
+    jd0 = julian_day(datetime(day.year, day.month, day.day, tzinfo=UTC))
+    jd = jd0 + np.arange(num_samples, dtype=float) / num_samples
+    r = radius_vector(julian_century(jd))
+    power = clear_sky_irradiance(np.array(trajectory.altitude), r)
+
+    # Regla del trapecio sobre las 24h, cerrando el ciclo con una muestra
+    # más a las 24h (prácticamente igual a la de las 0h: el cambio
+    # orbital/de declinación en un día es despreciable a esta precisión).
+    hours = np.arange(num_samples, dtype=float) * (24 / num_samples)
+    hours_closed = np.append(hours, 24.0)
+    power_closed = np.append(power, power[0])
+    energy_wh = float(np.trapezoid(power_closed, hours_closed))
+
+    return DailyIrradiation(
+        times=trajectory.times,
+        power_w_per_m2=[float(x) for x in power],
+        energy_wh_per_m2=energy_wh,
     )

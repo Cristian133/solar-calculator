@@ -69,3 +69,21 @@ class SolarNoonResponse(BaseModel):
     transit: datetime
     altitude_deg: float
     azimuth_deg: float
+
+
+class IrradianceSample(BaseModel):
+    """Irradiancia solar (cielo despejado) en un instante dado."""
+
+    time: datetime
+    power_w_per_m2: float
+
+
+class IrradianceResponse(BaseModel):
+    """Irradiancia solar a lo largo de un día y la energía total recibida
+    por m² en el día, en cielo despejado (punto 5)."""
+
+    latitude: float
+    longitude: float
+    date: date
+    energy_wh_per_m2: float
+    samples: list[IrradianceSample]

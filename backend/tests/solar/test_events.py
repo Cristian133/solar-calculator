@@ -7,6 +7,7 @@ from app.solar.coordinates import declination, right_ascension
 from app.solar.events import (
     STANDARD_ALTITUDE_SUN,
     _hour_angle_at_altitude,
+    daily_irradiation,
     solar_noon,
     solar_transit,
     sun_trajectory,
@@ -235,3 +236,45 @@ def test_solar_noon_azimuth_is_north_when_latitude_less_than_declination() -> No
 def test_solar_noon_azimuth_is_south_when_latitude_greater_than_declination() -> None:
     noon = solar_noon(date(2024, 6, 21), latitude_deg=40.4, longitude_deg=-3.7)
     assert noon.azimuth_deg == pytest.approx(180.0, abs=1e-6)
+
+
+# --- daily_irradiation -----------------------------------------------------
+
+
+def test_daily_irradiation_matches_requested_sample_count() -> None:
+    result = daily_irradiation(date(2024, 6, 1), -34.6, -58.4, num_samples=48)
+    assert len(result.times) == 48
+    assert len(result.power_w_per_m2) == 48
+
+
+def test_daily_irradiation_power_is_zero_at_night_and_positive_by_day() -> None:
+    result = daily_irradiation(date(2024, 6, 1), -34.6, -58.4, num_samples=96)
+    assert any(p == 0.0 for p in result.power_w_per_m2)  # de noche
+    assert any(p > 0.0 for p in result.power_w_per_m2)  # de día
+
+
+def test_daily_irradiation_energy_is_positive() -> None:
+    result = daily_irradiation(date(2024, 6, 1), -34.6, -58.4)
+    assert result.energy_wh_per_m2 > 0
+
+
+def test_daily_irradiation_energy_higher_in_summer_than_winter() -> None:
+    # Buenos Aires: más energía en el verano austral (diciembre) que en
+    # el invierno (junio) — días más largos y sol más alto.
+    summer = daily_irradiation(date(2024, 12, 21), -34.6, -58.4)
+    winter = daily_irradiation(date(2024, 6, 21), -34.6, -58.4)
+    assert summer.energy_wh_per_m2 > winter.energy_wh_per_m2
+
+
+def test_daily_irradiation_energy_higher_at_equator_than_high_latitude_on_equinox() -> None:
+    # En el equinoccio, el sol pasa más alto en el cielo (menos masa de
+    # aire, menos pérdida geométrica) en el ecuador que a alta latitud.
+    equator = daily_irradiation(date(2024, 3, 20), 0.0, 0.0)
+    high_latitude = daily_irradiation(date(2024, 3, 20), 60.0, 0.0)
+    assert equator.energy_wh_per_m2 > high_latitude.energy_wh_per_m2
+
+
+def test_daily_irradiation_zero_during_polar_night() -> None:
+    result = daily_irradiation(date(2024, 12, 21), 80.0, 0.0, num_samples=48)
+    assert all(p == 0.0 for p in result.power_w_per_m2)
+    assert result.energy_wh_per_m2 == 0.0
