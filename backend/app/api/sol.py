@@ -5,8 +5,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from app.schemas.sol import AnnualSunResponse, DailySun, SunPosition, TrajectoryResponse
-from app.solar.events import sun_trajectory, sunrise_sunset_year
+from app.schemas.sol import (
+    AnnualSunResponse,
+    DailySun,
+    DailySunResponse,
+    SolarNoonResponse,
+    SunPosition,
+    TrajectoryResponse,
+)
+from app.solar.events import solar_noon, sun_trajectory, sunrise_sunset, sunrise_sunset_year
 
 router = APIRouter()
 
@@ -18,6 +25,7 @@ Longitude = Annotated[
     float,
     Query(ge=-180, le=180, description="Longitud del observador, en grados (positiva al este)"),
 ]
+DateParam = Annotated[date_type, Query(description="Fecha (UTC)")]
 
 
 @router.get("/anual", response_model=AnnualSunResponse)
@@ -55,11 +63,48 @@ def anual(
     return AnnualSunResponse(latitude=latitude, longitude=longitude, year=year, days=days)
 
 
+@router.get("/dia", response_model=DailySunResponse)
+def dia(latitude: Latitude, longitude: Longitude, date: DateParam) -> DailySunResponse:
+    """Horas de sol en un día (punto 1): orto, tránsito, ocaso y duración
+    del día para una ubicación y fecha dadas."""
+    result = sunrise_sunset(date, latitude, longitude)
+    day_length_hours = (
+        (result.sunset - result.sunrise).total_seconds() / 3600
+        if result.sunrise and result.sunset
+        else None
+    )
+    return DailySunResponse(
+        latitude=latitude,
+        longitude=longitude,
+        date=date,
+        transit=result.transit,
+        sunrise=result.sunrise,
+        sunset=result.sunset,
+        day_length_hours=day_length_hours,
+        always_above=result.always_above,
+    )
+
+
+@router.get("/mediodia", response_model=SolarNoonResponse)
+def mediodia(latitude: Latitude, longitude: Longitude, date: DateParam) -> SolarNoonResponse:
+    """Mediodía solar e inclinación del Sol en ese instante (punto 4):
+    altitud máxima del día y azimut (0°=Norte o 180°=Sur)."""
+    result = solar_noon(date, latitude, longitude)
+    return SolarNoonResponse(
+        latitude=latitude,
+        longitude=longitude,
+        date=date,
+        transit=result.transit,
+        altitude_deg=result.altitude_deg,
+        azimuth_deg=result.azimuth_deg,
+    )
+
+
 @router.get("/trayectoria", response_model=TrajectoryResponse)
 def trayectoria(
     latitude: Latitude,
     longitude: Longitude,
-    date: Annotated[date_type, Query(description="Fecha (UTC)")],
+    date: DateParam,
     num_samples: Annotated[
         int,
         Query(

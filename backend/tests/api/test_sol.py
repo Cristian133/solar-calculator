@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -110,4 +111,95 @@ def test_trayectoria_rejects_out_of_range_latitude() -> None:
 
 def test_trayectoria_requires_date() -> None:
     response = client.get("/sol/trayectoria", params={"latitude": 0.0, "longitude": 0.0})
+    assert response.status_code == 422
+
+
+def test_dia_returns_normal_day() -> None:
+    response = client.get(
+        "/sol/dia",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-06-01"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["latitude"] == -34.6
+    assert body["longitude"] == -58.4
+    assert body["date"] == "2024-06-01"
+    assert body["sunrise"] is not None
+    assert body["sunset"] is not None
+    assert body["day_length_hours"] is not None
+    assert body["always_above"] is None
+
+
+def test_dia_polar_night_has_no_sunrise_or_sunset() -> None:
+    response = client.get(
+        "/sol/dia",
+        params={"latitude": 80.0, "longitude": 0.0, "date": "2024-12-21"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sunrise"] is None
+    assert body["sunset"] is None
+    assert body["day_length_hours"] is None
+    assert body["always_above"] is False
+
+
+def test_dia_matches_anual_same_day() -> None:
+    dia_response = client.get(
+        "/sol/dia",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-06-01"},
+    )
+    anual_response = client.get(
+        "/sol/anual", params={"latitude": -34.6, "longitude": -58.4, "year": 2024}
+    )
+    day_from_year = next(d for d in anual_response.json()["days"] if d["date"] == "2024-06-01")
+    assert dia_response.json()["transit"] == day_from_year["transit"]
+    assert dia_response.json()["sunrise"] == day_from_year["sunrise"]
+    assert dia_response.json()["sunset"] == day_from_year["sunset"]
+
+
+def test_dia_rejects_out_of_range_longitude() -> None:
+    response = client.get(
+        "/sol/dia", params={"latitude": 0.0, "longitude": -200.0, "date": "2024-06-01"}
+    )
+    assert response.status_code == 422
+
+
+def test_mediodia_returns_transit_altitude_and_azimuth() -> None:
+    response = client.get(
+        "/sol/mediodia",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-06-01"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["latitude"] == -34.6
+    assert body["longitude"] == -58.4
+    assert body["date"] == "2024-06-01"
+    assert body["transit"] is not None
+    assert -90 <= body["altitude_deg"] <= 90
+    assert 0 <= body["azimuth_deg"] < 360
+
+
+def test_mediodia_matches_dia_transit() -> None:
+    mediodia_response = client.get(
+        "/sol/mediodia",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-06-01"},
+    )
+    dia_response = client.get(
+        "/sol/dia",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-06-01"},
+    )
+    assert mediodia_response.json()["transit"] == dia_response.json()["transit"]
+
+
+def test_mediodia_azimuth_is_north_in_buenos_aires_december() -> None:
+    response = client.get(
+        "/sol/mediodia",
+        params={"latitude": -34.6, "longitude": -58.4, "date": "2024-12-21"},
+    )
+    assert response.status_code == 200
+    assert response.json()["azimuth_deg"] == pytest.approx(0.0, abs=1e-4)
+
+
+def test_mediodia_requires_date() -> None:
+    response = client.get("/sol/mediodia", params={"latitude": 0.0, "longitude": 0.0})
     assert response.status_code == 422

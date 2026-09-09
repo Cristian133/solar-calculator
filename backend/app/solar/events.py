@@ -73,6 +73,21 @@ class SunTrajectory:
 
 
 @dataclass(frozen=True)
+class SolarNoon:
+    """Mediodía solar (tránsito) y la inclinación del Sol en ese instante
+    — punto 4 del plan técnico.
+
+    `altitude_deg` es la altitud máxima del día (H=0 por definición de
+    tránsito). `azimuth_deg` es 0° (Norte) o 180° (Sur) salvo en el caso
+    límite en que el Sol pasa exactamente por el cenit (ver
+    `app.solar.horizontal.azimuth`)."""
+
+    transit: datetime
+    altitude_deg: float
+    azimuth_deg: float
+
+
+@dataclass(frozen=True)
 class SunYear:
     """Eventos solares de todos los días de un año calendario, para un
     observador dado — la versión vectorizada de `SunDay` que usa el
@@ -295,4 +310,17 @@ def sun_trajectory(
         times=times,
         altitude=[float(x) for x in alt],
         azimuth=[float(x) for x in az],
+    )
+
+
+def solar_noon(day: date, latitude_deg: float, longitude_deg: float) -> SolarNoon:
+    """Mediodía solar aparente y la inclinación del Sol en ese instante
+    (punto 4): altitud máxima del día y azimut, evaluadas en H=0 por
+    definición de tránsito."""
+    transit = solar_transit(day, longitude_deg)
+    delta = float(declination(julian_century(julian_day(transit))))
+    return SolarNoon(
+        transit=transit,
+        altitude_deg=float(altitude(latitude_deg, delta, 0.0)),
+        azimuth_deg=float(azimuth(latitude_deg, delta, 0.0)),
     )

@@ -7,6 +7,7 @@ from app.solar.coordinates import declination, right_ascension
 from app.solar.events import (
     STANDARD_ALTITUDE_SUN,
     _hour_angle_at_altitude,
+    solar_noon,
     solar_transit,
     sun_trajectory,
     sunrise_sunset,
@@ -205,3 +206,32 @@ def test_sun_trajectory_max_altitude_near_solar_transit() -> None:
 
     sampling_step = timedelta(hours=24 / num_samples)
     assert abs((peak_time - transit).total_seconds()) <= sampling_step.total_seconds()
+
+
+# --- solar_noon ----------------------------------------------------------
+
+
+def test_solar_noon_transit_matches_solar_transit() -> None:
+    day, lon = date(2024, 3, 20), -3.7
+    assert solar_noon(day, latitude_deg=40.4, longitude_deg=lon).transit == solar_transit(day, lon)
+
+
+def test_solar_noon_altitude_matches_sun_trajectory_peak() -> None:
+    # Regresión cruzada: la altitud de mediodía debe ser (casi) el máximo
+    # de la trayectoria muestreada del mismo día.
+    day, lat, lon = date(2024, 3, 20), 40.4, -3.7
+    noon = solar_noon(day, lat, lon)
+    trajectory = sun_trajectory(day, lat, lon, num_samples=288)
+    assert noon.altitude_deg == pytest.approx(max(trajectory.altitude), abs=0.05)
+
+
+def test_solar_noon_azimuth_is_north_when_latitude_less_than_declination() -> None:
+    # Mismo hecho que en test_horizontal.py: Buenos Aires en diciembre,
+    # el sol de mediodía queda al Norte.
+    noon = solar_noon(date(2024, 12, 21), latitude_deg=-34.6, longitude_deg=-58.4)
+    assert noon.azimuth_deg == pytest.approx(0.0, abs=1e-6)
+
+
+def test_solar_noon_azimuth_is_south_when_latitude_greater_than_declination() -> None:
+    noon = solar_noon(date(2024, 6, 21), latitude_deg=40.4, longitude_deg=-3.7)
+    assert noon.azimuth_deg == pytest.approx(180.0, abs=1e-6)

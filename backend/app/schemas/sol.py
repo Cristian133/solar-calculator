@@ -31,6 +31,14 @@ class AnnualSunResponse(BaseModel):
     days: list[DailySun]
 
 
+class DailySunResponse(DailySun):
+    """Horas de sol de un único día (punto 1) — mismos campos que
+    `DailySun`, con la ubicación consultada."""
+
+    latitude: float
+    longitude: float
+
+
 class SunPosition(BaseModel):
     """Posición del Sol (altitud/azimut) en un instante dado."""
 
@@ -47,3 +55,17 @@ class TrajectoryResponse(BaseModel):
     longitude: float
     date: date
     samples: list[SunPosition]
+
+
+class SolarNoonResponse(BaseModel):
+    """Mediodía solar e inclinación del Sol en ese instante (punto 4).
+
+    `altitude_deg` es la altitud máxima del día; `azimuth_deg` es 0°
+    (Norte) o 180° (Sur) salvo en el caso límite del Sol en el cenit."""
+
+    latitude: float
+    longitude: float
+    date: date
+    transit: datetime
+    altitude_deg: float
+    azimuth_deg: float
