@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from app.solar.coordinates import declination, right_ascension
+from app.solar.horizontal import altitude, hour_angle, local_sidereal_time
 from app.solar.time import datetime_from_julian_day, julian_century, julian_day, mean_sidereal_time
 
 STANDARD_ALTITUDE_SUN = -0.8333
@@ -46,28 +47,13 @@ class SunDay:
     always_above: bool | None
 
 
-def _wrap180(angle_deg: float) -> float:
-    """Normaliza un ángulo a (-180, 180]."""
-    return (angle_deg + 180) % 360 - 180
-
-
-def _hour_angle(jd: float, longitude_deg: float) -> float:
+def _sun_hour_angle(jd: float, longitude_deg: float) -> float:
     """Ángulo horario (H) del Sol en `jd`, en grados, normalizado a
     (-180, 180]. Positivo del mediodía solar hacia adelante (tarde)."""
     t = julian_century(jd)
     alpha = right_ascension(t)
-    theta0 = mean_sidereal_time(jd)
-    return _wrap180(theta0 + longitude_deg - alpha)
-
-
-def _altitude(latitude_deg: float, declination_deg: float, hour_angle_deg: float) -> float:
-    """Altitud del Sol sobre el horizonte, en grados, dados latitud,
-    declinación y ángulo horario."""
-    phi = math.radians(latitude_deg)
-    delta = math.radians(declination_deg)
-    h = math.radians(hour_angle_deg)
-    sin_altitude = math.sin(phi) * math.sin(delta) + math.cos(phi) * math.cos(delta) * math.cos(h)
-    return math.degrees(math.asin(sin_altitude))
+    lst = local_sidereal_time(mean_sidereal_time(jd), longitude_deg)
+    return hour_angle(lst, alpha)
 
 
 def _hour_angle_at_altitude(
@@ -97,7 +83,7 @@ def solar_transit(day: date, longitude_deg: float) -> datetime:
     m = (0.5 - longitude_deg / 360) % 1
 
     for _ in range(_MAX_ITERATIONS):
-        m -= _hour_angle(jd0 + m, longitude_deg) / 360
+        m -= _sun_hour_angle(jd0 + m, longitude_deg) / 360
 
     return datetime_from_julian_day(jd0 + m)
 
@@ -119,7 +105,7 @@ def sunrise_sunset(
     h0 = _hour_angle_at_altitude(latitude_deg, delta_at_transit, altitude_deg)
 
     if h0 is None:
-        altitude_at_transit = _altitude(latitude_deg, delta_at_transit, 0.0)
+        altitude_at_transit = altitude(latitude_deg, delta_at_transit, 0.0)
         return SunDay(
             transit=transit,
             sunrise=None,
@@ -151,14 +137,14 @@ def _refine_horizon_crossing(
         jd = jd0 + m
         t = julian_century(jd)
         delta_deg = declination(t)
-        h_deg = _hour_angle(jd, longitude_deg)
-        altitude = _altitude(latitude_deg, delta_deg, h_deg)
+        h_deg = _sun_hour_angle(jd, longitude_deg)
+        current_altitude = altitude(latitude_deg, delta_deg, h_deg)
 
         sin_h = math.sin(math.radians(h_deg))
         if sin_h == 0:
             break
         cos_delta = math.cos(math.radians(delta_deg))
         cos_phi = math.cos(math.radians(latitude_deg))
-        m += (altitude - altitude_deg) / (360 * cos_delta * cos_phi * sin_h)
+        m += (current_altitude - altitude_deg) / (360 * cos_delta * cos_phi * sin_h)
 
     return datetime_from_julian_day(jd0 + m)

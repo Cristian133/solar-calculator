@@ -6,7 +6,7 @@ Módulos (ver docs/plan_tecnico.md, sección 4):
 - coordinates.py: posición solar (Meeus, cap. 25, método de baja precisión).
   Hecho.
 - horizontal.py: transformación ecuatorial -> horizontal (azimut/altitud).
-  Pendiente.
+  Hecho.
 - events.py: orto, tránsito y ocaso (Meeus, cap. 15). Hecho.
 - refraction.py: refracción atmosférica (Meeus, cap. 16). Pendiente.
 - irradiance.py: irradiancia de cielo despejado (fuente de respaldo, no

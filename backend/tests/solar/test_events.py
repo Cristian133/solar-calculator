@@ -4,7 +4,6 @@ import pytest
 
 from app.solar.events import (
     STANDARD_ALTITUDE_SUN,
-    _altitude,
     _hour_angle_at_altitude,
     solar_transit,
     sunrise_sunset,
@@ -40,17 +39,8 @@ def test_hour_angle_at_altitude_none_when_circumpolar_or_never_rises() -> None:
     assert _hour_angle_at_altitude(45.0, -46.0, 0.0) is None  # noche polar
 
 
-def test_altitude_at_transit_equals_90_minus_zenith_distance() -> None:
-    # H=0 (tránsito) con el Sol exactamente en el cenit del observador.
-    assert _altitude(45.0, 45.0, 0.0) == pytest.approx(90.0)
-
-
-def test_altitude_is_zero_six_hours_from_transit_when_declination_is_zero() -> None:
-    # H=90° con declinación 0: el Sol está justo en el horizonte,
-    # independientemente de la latitud.
-    for latitude_deg in [-60.0, 0.0, 60.0]:
-        assert _altitude(latitude_deg, 0.0, 90.0) == pytest.approx(0.0, abs=1e-9)
-
+# Las identidades de altitud (H=0 -> cenit, H=±90° con declinación 0 ->
+# horizonte) ahora se prueban en test_horizontal.py, donde vive esa función.
 
 # --- Comportamiento integrado (tránsito, orto/ocaso) ------------------------
 
