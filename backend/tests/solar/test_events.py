@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 
+import numpy as np
 import pytest
 
 from app.solar.events import (
@@ -7,6 +8,7 @@ from app.solar.events import (
     _hour_angle_at_altitude,
     solar_transit,
     sunrise_sunset,
+    sunrise_sunset_year,
 )
 
 # --- Identidades exactas de las funciones auxiliares -----------------------
@@ -19,24 +21,44 @@ def test_hour_angle_at_altitude_is_90_at_equator_regardless_of_declination() -> 
     # En el ecuador el Sol siempre pasa 12h sobre el horizonte y 12h debajo,
     # sea cual sea su declinación (geométricamente, sin refracción).
     for declination_deg in [-23.4, 0.0, 23.4]:
-        assert _hour_angle_at_altitude(0.0, declination_deg, 0.0) == pytest.approx(90.0)
+        h0, always_above, always_below = _hour_angle_at_altitude(0.0, declination_deg, 0.0)
+        assert h0 == pytest.approx(90.0)
+        assert not always_above
+        assert not always_below
 
 
 def test_hour_angle_at_altitude_borderline_circumpolar() -> None:
     # latitud = declinación: el Sol roza el horizonte a medianoche (H0=180,
     # borde exacto del día polar) — identidad tan(45)*tan(45) = 1.
-    assert _hour_angle_at_altitude(45.0, 45.0, 0.0) == pytest.approx(180.0)
+    h0, always_above, always_below = _hour_angle_at_altitude(45.0, 45.0, 0.0)
+    assert h0 == pytest.approx(180.0)
+    assert not always_above
+    assert not always_below
 
 
 def test_hour_angle_at_altitude_borderline_never_rises() -> None:
     # latitud = -declinación: el Sol roza el horizonte a mediodía (H0=0,
     # borde exacto de la noche polar).
-    assert _hour_angle_at_altitude(45.0, -45.0, 0.0) == pytest.approx(0.0, abs=1e-4)
+    h0, always_above, always_below = _hour_angle_at_altitude(45.0, -45.0, 0.0)
+    assert h0 == pytest.approx(0.0, abs=1e-4)
+    assert not always_above
+    assert not always_below
 
 
-def test_hour_angle_at_altitude_none_when_circumpolar_or_never_rises() -> None:
-    assert _hour_angle_at_altitude(45.0, 46.0, 0.0) is None  # sol de medianoche
-    assert _hour_angle_at_altitude(45.0, -46.0, 0.0) is None  # noche polar
+def test_hour_angle_at_altitude_flags_circumpolar_and_never_rises() -> None:
+    _, always_above, always_below = _hour_angle_at_altitude(45.0, 46.0, 0.0)
+    assert always_above and not always_below  # sol de medianoche
+
+    _, always_above, always_below = _hour_angle_at_altitude(45.0, -46.0, 0.0)
+    assert always_below and not always_above  # noche polar
+
+
+def test_hour_angle_at_altitude_vectorizes_over_numpy_arrays() -> None:
+    declinations = np.array([46.0, 0.0, -46.0])
+    h0, always_above, always_below = _hour_angle_at_altitude(45.0, declinations, 0.0)
+    assert list(always_above) == [True, False, False]
+    assert list(always_below) == [False, False, True]
+    assert h0[1] == pytest.approx(90.0)
 
 
 # Las identidades de altitud (H=0 -> cenit, H=±90° con declinación 0 ->
@@ -96,3 +118,37 @@ def test_polar_night_near_december_solstice_at_high_latitude() -> None:
 def test_default_altitude_is_standard_altitude_sun() -> None:
     day, lat, lon = date(2024, 6, 1), -34.6, -58.4
     assert sunrise_sunset(day, lat, lon) == sunrise_sunset(day, lat, lon, STANDARD_ALTITUDE_SUN)
+
+
+# --- Consistencia entre la versión escalar (un día) y la vectorizada -------
+# (todo el año a la vez): deben dar exactamente el mismo resultado, porque
+# ambas llaman al mismo núcleo (`_solar_transit_jd`, `_hour_angle_at_altitude`,
+# `_refine_horizon_crossing`) con un jd0 escalar o con un array, respectivamente.
+
+
+@pytest.mark.parametrize(
+    ("latitude_deg", "longitude_deg"),
+    [
+        (-34.6, -58.4),  # Buenos Aires: día normal todo el año
+        (80.0, 0.0),  # latitud alta: incluye sol de medianoche y noche polar
+    ],
+)
+def test_sunrise_sunset_year_matches_day_by_day_scalar_calls(
+    latitude_deg: float, longitude_deg: float
+) -> None:
+    year = 2024
+    result = sunrise_sunset_year(year, latitude_deg, longitude_deg)
+    assert len(result.dates) == 366  # 2024 es bisiesto
+
+    sample_days_of_year = [0, 79, 171, 264, 355, 365]  # incluye 1 ene y 31 dic
+    for i in sample_days_of_year:
+        expected = sunrise_sunset(result.dates[i], latitude_deg, longitude_deg)
+        assert result.transit[i] == expected.transit
+        assert result.sunrise[i] == expected.sunrise
+        assert result.sunset[i] == expected.sunset
+        assert result.always_above[i] == expected.always_above
+
+
+def test_sunrise_sunset_year_length_matches_calendar_year() -> None:
+    assert len(sunrise_sunset_year(2023, 0.0, 0.0).dates) == 365  # no bisiesto
+    assert len(sunrise_sunset_year(2024, 0.0, 0.0).dates) == 366  # bisiesto
